@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>결제 완료 - 비바샵</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f0f0f;--surface:#1a1a1a;--surface-2:#252525;
+  --border:rgba(255,255,255,0.08);--primary:#6366f1;--primary-h:#818cf8;
+  --success:#22c55e;--danger:#ef4444;--text:#f1f5f9;--muted:#94a3b8;--radius:14px;
+}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;
+  min-height:100vh;display:flex;flex-direction:column;}
+.nav{display:flex;align-items:center;justify-content:space-between;
+  padding:0 24px;height:60px;border-bottom:1px solid var(--border);
+  background:rgba(15,15,15,0.9);backdrop-filter:blur(10px);}
+.nav-logo{font-size:1.2rem;font-weight:700;color:var(--text);text-decoration:none;}
+main{flex:1;display:flex;align-items:center;justify-content:center;padding:40px 24px;}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:48px 40px;width:100%;max-width:480px;text-align:center;}
+.icon{font-size:4rem;margin-bottom:20px;display:block;}
+.title{font-size:1.6rem;font-weight:700;margin-bottom:10px;}
+.sub{color:var(--muted);margin-bottom:32px;line-height:1.6;}
+.order-box{background:var(--surface-2);border-radius:10px;padding:20px;
+  text-align:left;margin-bottom:28px;}
+.order-row{display:flex;justify-content:space-between;align-items:center;
+  padding:8px 0;border-bottom:1px solid var(--border);font-size:.9rem;}
+.order-row:last-child{border:none;padding-bottom:0;}
+.order-row.total{font-weight:700;font-size:1rem;margin-top:4px;}
+.order-label{color:var(--muted);}
+.btns{display:flex;gap:12px;}
+.btn{flex:1;padding:13px;border:none;border-radius:10px;font-size:.9rem;
+  font-weight:600;cursor:pointer;transition:all .15s;text-decoration:none;
+  display:flex;align-items:center;justify-content:center;}
+.btn-primary{background:var(--primary);color:#fff;}
+.btn-primary:hover{background:var(--primary-h);}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text);}
+.btn-outline:hover{background:var(--surface-2);}
+.spinner{width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--success);
+  border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 20px;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.status-processing .icon,.status-processing .title,.status-processing .sub,
+.status-processing .order-box,.status-processing .btns{display:none;}
+.status-done .spinner{display:none;}
+.status-error .spinner,.status-error .icon,.status-error .order-box{display:none;}
+.status-error .title{color:var(--danger);}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <a href="index.html" class="nav-logo">🎁 비바샵</a>
+</nav>
+<main>
+  <div class="card status-processing" id="card">
+    <div class="spinner"></div>
+    <span class="icon">✅</span>
+    <div class="title">결제가 완료되었습니다!</div>
+    <div class="sub">주문해 주셔서 감사합니다.<br>내 주문 내역에서 확인할 수 있어요.</div>
+    <div class="order-box" id="orderBox"></div>
+    <div class="btns">
+      <a href="orders.html" class="btn btn-primary">내 주문 보기</a>
+      <a href="index.html" class="btn btn-outline">쇼핑 계속</a>
+    </div>
+  </div>
+</main>
+
+<script>
+const SUPABASE_URL = 'https://bnkibfbpzdbccnqrysub.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJua2liZmJwemRiY2NucXJ5c3ViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyNjMyMDcsImV4cCI6MjA5MzgzOTIwN30.PVOTXsJjfv7L5dxRCqaYy6l_BvIan-FUFmaShWiN2i0';
+const EDGE_URL = SUPABASE_URL + '/functions/v1/confirm-payment';
+const client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+function setStatus(s) {
+  document.getElementById('card').className = 'card status-' + s;
+}
+function fmt(n) { return n.toLocaleString('ko-KR') + '원'; }
+
+(async () => {
+  const params = new URLSearchParams(location.search);
+  const paymentKey = params.get('paymentKey');
+  const orderId = params.get('orderId');
+  const amount = Number(params.get('amount'));
+
+  if (!paymentKey || !orderId || !amount) {
+    setStatus('error');
+    document.querySelector('.title').textContent = '잘못된 접근입니다.';
+    document.querySelector('.sub').textContent = '결제 정보가 없습니다.';
+    return;
+  }
+
+  const { data: { session } } = await client.auth.getSession();
+  if (!session) { location.href = 'auth.html'; return; }
+
+  const cart = JSON.parse(sessionStorage.getItem('vibeshop_pending_cart') || '[]');
+
+  try {
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + session.access_token,
+      },
+      body: JSON.stringify({
+        paymentKey, orderId, amount,
+        items: cart.map(i => ({ product_id: i.id, quantity: i.qty, unit_price: i.price })),
+      }),
+    });
+
+    const json = await res.json();
+    if (!res.ok || !json.success) throw new Error(json.error || '결제 확인 실패');
+
+    // 성공: cart 삭제
+    localStorage.removeItem('vibeshop_cart');
+    sessionStorage.removeItem('vibeshop_pending_cart');
+
+    // 주문 요약 렌더
+    const box = document.getElementById('orderBox');
+    let html = '';
+    cart.forEach(i => {
+      html += `<div class="order-row">
+        <span>${i.emoji} ${i.name} × ${i.qty}</span>
+        <span>${fmt(i.price * i.qty)}</span>
+      </div>`;
+    });
+    html += `<div class="order-row total">
+      <span class="order-label">총 결제금액</span>
+      <span style="color:var(--success)">${fmt(amount)}</span>
+    </div>`;
+    box.innerHTML = html;
+
+    setStatus('done');
+  } catch (err) {
+    setStatus('error');
+    document.querySelector('.title').textContent = '결제 처리 중 오류 발생';
+    document.querySelector('.sub').textContent = err.message;
+  }
+})();
+</script>
+</body>
+</html>
